@@ -1,0 +1,93 @@
+library(Rspotify)
+library(spotifyr)
+library(httr)
+library(jsonlite)
+
+Sys.setenv(SPOTIFY_CLIENT_ID = '7fb54c7e15bd497db349b6cb4ded484a')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '8d5c2839b97a49358634678671afc34f')
+access_token <- get_spotify_access_token()
+
+
+client_id <- '7fb54c7e15bd497db349b6cb4ded484a'
+client_secret <- '8d5c2839b97a49358634678671afc34f'
+
+## Creating a function to get ids:
+getids <- function(artist_name){
+  
+  response <- GET(
+    paste0("https://api.spotify.com/v1/search?q=", URLencode(artist_name), "&type=artist&limit=1"),
+    add_headers("Authorization" = paste("Bearer", access_token)),
+    verbose()
+  )
+  
+  artist_data <- fromJSON(content(response, "text"), flatten = TRUE)
+  artist_id <- artist_data$artists$items$id
+  
+}
+
+# create an empty dataframe with columns for artist names and IDs
+artist_df <- data.frame(artist_name = character(), artist_id = character(), stringsAsFactors = FALSE)
+artist_df2 <- data.frame(artist_name = character(), artist_id = character(), stringsAsFactors = FALSE)
+artist_df3 <- data.frame(artist_name = character(), artist_id = character(), stringsAsFactors = FALSE)
+## Read file containing names here
+
+artistnames <- read.csv("/Users/muhammad.zaryab/Desktop/scripts/Spotify/artistnames2.csv")
+# subset the names from last observation onwards
+artistnames2 <- artistnames %>% slice(8385:n())
+
+## skipping errors and getting ids
+for (name in artistnames2$Artist) {
+  id <- tryCatch({
+    getids(name)
+  }, error = function(e) {
+    return(NULL) # return NULL if there is an error
+  })
+  
+  if (!is.null(id)) {
+    # add the artist name and ID to the dataframe
+    artist_df2 <- rbind(artist_df2, data.frame(artist_name = name, artist_id = id, stringsAsFactors = FALSE))
+  }
+  
+  Sys.sleep(0.5)
+}
+
+## function to get popularity
+getpopularity <- function(artist_id){
+  popularity <- get_artist(artist_id) %>% .$popularity
+}
+
+# create a new column in your dataframe to store the output of your function
+artist_df2$popularity <- NA
+
+# use a for loop to iterate over values in the artist_id column
+for (i in 1:nrow(artist_df2)) {
+  tryCatch({
+    # apply the function to the artist_id value
+    genre <- getpopularity(artist_df2$artist_id[i])
+    # store the output in the new column
+    artist_df2$popularity[i] <- genre
+  }, error = function(e) {
+    # ignore errors and skip to the next iteration
+    next
+  })
+  
+  Sys.sleep(0.5)
+}
+
+
+# add new column based on popularity ranges
+artist_df2$Tier <- ifelse(artist_df2$popularity < 35, "Developing",
+                         ifelse(artist_df2$popularity < 50, "Mid-Level",
+                                ifelse(artist_df2$popularity < 70, "Mainstream",
+                                       ifelse(artist_df2$popularity < 95, "Superstar",
+                                              "Legendary"))))
+
+
+## merge together artistdf1 and 2
+artist_df_merged2 <- rbind(artist_df_merged, artist_df2)
+
+oldlist <- read.csv("/Users/muhammad.zaryab/Desktop/scripts/Spotify/artistnames.csv")
+
+
+finallist2 <- left_join(oldlist, artist_df_merged, by = c("Artist" = "artist_name"))
+write_csv(artist_df_merged2, "/Users/muhammad.zaryab/Desktop/scripts/Spotify/artist-tiers.csv")
